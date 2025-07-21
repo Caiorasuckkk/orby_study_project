@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "850594100217",
+    "project_id": "orbyt-81999",
+    "storage_bucket": "orbyt-81999.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:850594100217:android:c46066fc2a8d770bf98328",
+        "android_client_info": {
+          "package_name": "com.example.orbyt"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCFHHBZCCO4EKvZWWr9IbMqcPr-zQMndj4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
