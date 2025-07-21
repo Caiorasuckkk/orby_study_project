@@ -3,6 +3,7 @@ import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 import 'Orby/OrbyIntroScreen.dart';
@@ -347,7 +348,9 @@ class _EstudosScreenState extends State<EstudosScreen> {
 
 Future<String> gerarPlanoEstudosComIA(Map<String, dynamic> respostas) async {
   const endpoint = 'https://api.openai.com/v1/chat/completions';
-  const openAIApiKey = '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'; // 🔒 Substitua por variável segura em produção
+  await dotenv.load();
+
+  final openAIApiKey = dotenv.env['OPENAI_API_KEY'];
 
   final prompt = '''
 Sou um mentor de estudos para vestibulares. Com base nas informações fornecidas pelo aluno, crie um plano de estudos **detalhado, equilibrado e eficaz**.
