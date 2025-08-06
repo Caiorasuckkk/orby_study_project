@@ -1,8 +1,10 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:orbyt/Screens/Menu/StudyPlan.dart';
 
-import 'ObjetivosScreen.dart';
-import 'RegisterScreen.dart';// certifique-se de importar
+import '../Objetivos/Orby/OrbyIntroScreen.dart';
+import 'RegisterScreen.dart'; // certifique-se de importar
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -20,20 +22,46 @@ class _LoginScreenState extends State<LoginScreen> {
     setState(() => isLoading = true);
 
     try {
-      await FirebaseAuth.instance.signInWithEmailAndPassword(
+      final authResult = await FirebaseAuth.instance.signInWithEmailAndPassword(
         email: emailController.text.trim(),
         password: passwordController.text.trim(),
       );
 
-      // Navegar para a tela de objetivo se login for bem-sucedido
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (_) => const ObjetivoScreen()),
-      );
+      final uid = authResult.user?.uid;
+      if (uid != null) {
+        final userDoc =
+            await FirebaseFirestore.instance
+                .collection('usuarios')
+                .doc(uid)
+                .get();
+
+        final data = userDoc.data();
+        final temAvatar =
+            data != null &&
+            data.containsKey('orby_avatar') &&
+            data['orby_avatar'] != null &&
+            data['orby_avatar'].toString().isNotEmpty;
+
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder:
+                (_) =>
+                    temAvatar
+                        ? const StudyPlanScreen()
+                        : const OrbyIntroScreen(),
+          ),
+        );
+      } else {
+        throw FirebaseAuthException(
+          message: "Usuário não encontrado.",
+          code: "user-not-found",
+        );
+      }
     } on FirebaseAuthException catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Erro: ${e.message}')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Erro: ${e.message}')));
     } finally {
       setState(() => isLoading = false);
     }
@@ -54,7 +82,10 @@ class _LoginScreenState extends State<LoginScreen> {
               const SizedBox(height: 20),
               TextField(
                 controller: emailController,
-                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                ),
                 decoration: InputDecoration(
                   hintText: 'E-Mail',
                   hintStyle: const TextStyle(color: Colors.white),
@@ -74,7 +105,10 @@ class _LoginScreenState extends State<LoginScreen> {
               TextField(
                 controller: passwordController,
                 obscureText: true,
-                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                ),
                 decoration: InputDecoration(
                   hintText: 'Senha',
                   hintStyle: const TextStyle(color: Colors.white),
@@ -96,11 +130,14 @@ class _LoginScreenState extends State<LoginScreen> {
                 children: [
                   const Text(
                     "Esqueceu a senha? ",
-                    style: TextStyle(color: Colors.white, fontWeight: FontWeight.w500),
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w500,
+                    ),
                   ),
                   GestureDetector(
                     onTap: () {
-                      // TODO: Redirecionar para tela de recuperação
+                      //Fazer
                     },
                     child: const Text(
                       "Clique Aqui",
@@ -124,12 +161,17 @@ class _LoginScreenState extends State<LoginScreen> {
                       borderRadius: BorderRadius.circular(40),
                     ),
                   ),
-                  child: isLoading
-                      ? const CircularProgressIndicator(color: Colors.white)
-                      : const Text(
-                    "Login",
-                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white),
-                  ),
+                  child:
+                      isLoading
+                          ? const CircularProgressIndicator(color: Colors.white)
+                          : const Text(
+                            "Login",
+                            style: TextStyle(
+                              fontSize: 20,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.white,
+                            ),
+                          ),
                 ),
               ),
               const SizedBox(height: 15),
@@ -139,7 +181,9 @@ class _LoginScreenState extends State<LoginScreen> {
                   onPressed: () {
                     Navigator.push(
                       context,
-                      MaterialPageRoute(builder: (context) => const CadastroScreen()),
+                      MaterialPageRoute(
+                        builder: (context) => const CadastroScreen(),
+                      ),
                     );
                   },
                   style: ElevatedButton.styleFrom(
@@ -151,7 +195,11 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                   child: const Text(
                     "Cadastre-se",
-                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white),
+                    style: TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                    ),
                   ),
                 ),
               ),

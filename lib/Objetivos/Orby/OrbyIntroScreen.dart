@@ -1,8 +1,8 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-import '../../Menu/StudyPlan.dart';
- // Certifique-se de ajustar o caminho conforme sua estrutura
+import '../../Screens/Menu/StudyPlan.dart';
+// Certifique-se de ajustar o caminho conforme sua estrutura
 
 class OrbyIntroScreen extends StatefulWidget {
   const OrbyIntroScreen({super.key});
@@ -38,27 +38,17 @@ class _OrbyIntroScreenState extends State<OrbyIntroScreen> {
 
   final List<String> avatares = List.generate(
     9,
-        (index) => 'assets/images/orby_base${index + 1}.png',
+    (index) => 'assets/images/orby_base${index + 1}.png',
   );
 
   Future<void> _salvarPersonalizacao() async {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
 
-    final avatarFinal = avatarSelecionado!
-        .split('/')
-        .last
-        .replaceAll('.png', '');
-
-    await FirebaseFirestore.instance
-        .collection('usuarios')
-        .doc(uid)
-        .collection('Assistente')
-        .doc('orbyt')
-        .set({
-      'nome': nomeController.text.trim(),
-      'cor': corSelecionada,
-      'avatar': avatarFinal,
+    await FirebaseFirestore.instance.collection('usuarios').doc(uid).update({
+      'orby_nome': nomeController.text.trim(),
+      'orby_cor': corSelecionada,
+      'orby_avatar': avatarSelecionado,
     });
 
     if (mounted) {
@@ -86,17 +76,15 @@ class _OrbyIntroScreenState extends State<OrbyIntroScreen> {
           selectedColor.withOpacity(0.6),
           BlendMode.srcATop,
         ),
-        child: Image.asset(
-          caminhoImagem,
-          height: 140,
-        ),
+        child: Image.asset(caminhoImagem, height: 140),
       ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    final isFormValid = nomeController.text.isNotEmpty &&
+    final isFormValid =
+        nomeController.text.isNotEmpty &&
         corSelecionada != null &&
         avatarSelecionado != null;
 
@@ -127,31 +115,46 @@ class _OrbyIntroScreenState extends State<OrbyIntroScreen> {
                 alignment: Alignment.centerLeft,
                 child: Text(
                   'Visualização do Orby:',
-                  style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
               ),
               const SizedBox(height: 12),
               Center(
-                child: (corSelecionada != null && avatarSelecionado != null)
-                    ? _colorFilteredAvatar(corSelecionada!, avatarSelecionado!)
-                    : Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: const Text(
-                    'Selecione um avatar',
-                    style: TextStyle(fontSize: 16, color: Colors.black54),
-                  ),
-                ),
+                child:
+                    (corSelecionada != null && avatarSelecionado != null)
+                        ? _colorFilteredAvatar(
+                          corSelecionada!,
+                          avatarSelecionado!,
+                        )
+                        : Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: const Text(
+                            'Selecione um avatar',
+                            style: TextStyle(
+                              fontSize: 16,
+                              color: Colors.black54,
+                            ),
+                          ),
+                        ),
               ),
               const SizedBox(height: 24),
               const Align(
                 alignment: Alignment.centerLeft,
                 child: Text(
                   'Nome do seu assistente:',
-                  style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
               ),
               const SizedBox(height: 8),
@@ -164,7 +167,9 @@ class _OrbyIntroScreenState extends State<OrbyIntroScreen> {
                   fillColor: Colors.white12,
                   hintText: 'Ex: Orbyt',
                   hintStyle: const TextStyle(color: Colors.white54),
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(40)),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(40),
+                  ),
                 ),
               ),
               const SizedBox(height: 24),
@@ -172,37 +177,50 @@ class _OrbyIntroScreenState extends State<OrbyIntroScreen> {
                 alignment: Alignment.centerLeft,
                 child: Text(
                   'Escolha a cor do Orby:',
-                  style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
               ),
               const SizedBox(height: 8),
               Wrap(
                 spacing: 12,
                 runSpacing: 8,
-                children: cores.map((cor) {
-                  final isSelected = corSelecionada == cor;
-                  return ChoiceChip(
-                    label: Text(cor),
-                    selected: isSelected,
-                    onSelected: (bool selected) {
-                      setState(() => corSelecionada = selected ? cor : null);
-                    },
-                    selectedColor: corMap[cor],
-                    labelStyle: TextStyle(
-                      color: isSelected ? Colors.white : Colors.black87,
-                      fontWeight: FontWeight.w600,
-                    ),
-                    backgroundColor: Colors.white,
-                    shape: const StadiumBorder(side: BorderSide(color: Colors.white)),
-                  );
-                }).toList(),
+                children:
+                    cores.map((cor) {
+                      final isSelected = corSelecionada == cor;
+                      return ChoiceChip(
+                        label: Text(cor),
+                        selected: isSelected,
+                        onSelected: (bool selected) {
+                          setState(
+                            () => corSelecionada = selected ? cor : null,
+                          );
+                        },
+                        selectedColor: corMap[cor],
+                        labelStyle: TextStyle(
+                          color: isSelected ? Colors.white : Colors.black87,
+                          fontWeight: FontWeight.w600,
+                        ),
+                        backgroundColor: Colors.white,
+                        shape: const StadiumBorder(
+                          side: BorderSide(color: Colors.white),
+                        ),
+                      );
+                    }).toList(),
               ),
               const SizedBox(height: 24),
               const Align(
                 alignment: Alignment.centerLeft,
                 child: Text(
                   'Escolha um avatar:',
-                  style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
               ),
               const SizedBox(height: 8),
@@ -221,17 +239,15 @@ class _OrbyIntroScreenState extends State<OrbyIntroScreen> {
                         decoration: BoxDecoration(
                           color: Colors.white10,
                           border: Border.all(
-                            color: avatarSelecionado == avatar
-                                ? const Color(0xFF4A90E2)
-                                : Colors.white,
+                            color:
+                                avatarSelecionado == avatar
+                                    ? const Color(0xFF4A90E2)
+                                    : Colors.white,
                             width: 2,
                           ),
                           borderRadius: BorderRadius.circular(16),
                         ),
-                        child: Image.asset(
-                          avatar,
-                          height: 80,
-                        ),
+                        child: Image.asset(avatar, height: 80),
                       ),
                     );
                   },
@@ -245,11 +261,17 @@ class _OrbyIntroScreenState extends State<OrbyIntroScreen> {
                   style: ElevatedButton.styleFrom(
                     backgroundColor: const Color(0xFF4A90E2),
                     padding: const EdgeInsets.symmetric(vertical: 16),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(40)),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(40),
+                    ),
                   ),
                   child: const Text(
                     'Salvar e Continuar',
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white),
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                    ),
                   ),
                 ),
               ),

@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'Screens/Menu/StudyPlan.dart';
 import 'TelasIniciais/AnimationFirstScreen.dart';
 import 'TelasIniciais/RegisterScreen.dart';
 import 'TelasIniciais/login_screen.dart'; // ou OnboardingScreen, conforme seu fluxo
@@ -7,7 +9,7 @@ import 'TelasIniciais/login_screen.dart'; // ou OnboardingScreen, conforme seu f
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(); // <- INICIALIZAÇÃO IMPORTANTE
-
+  await dotenv.load(fileName: ".env" );
   runApp(const MyApp());
 }
 
@@ -28,6 +30,7 @@ class MyApp extends StatelessWidget {
         '/': (context) => const SplashScreen(), // ou OnboardingScreen se quiser pular Splash
         '/login': (context) => const LoginScreen(),
         '/cadastro': (context) => const CadastroScreen(),
+        '/studyplan': (context) => const StudyPlanScreen(),
       },
     );
   }
