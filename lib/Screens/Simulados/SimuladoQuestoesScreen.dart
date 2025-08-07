@@ -5,7 +5,7 @@ import 'package:intl/intl.dart';
 
 class SimuladoQuestoesScreen_Materias extends StatefulWidget {
   final List<dynamic> exercicios;
-  final String area; // Ex: 'Exatas', 'Humanas'...
+  final String area;
 
   const SimuladoQuestoesScreen_Materias({super.key, required this.exercicios, required this.area});
 
@@ -143,8 +143,8 @@ class _SimuladoQuestoesScreen_MateriasState extends State<SimuladoQuestoesScreen
                     ),
                     TextButton(
                       onPressed: () {
-                        Navigator.pop(context); // Fecha o AlertDialog
-                        Navigator.pop(context); // Sai da tela do simulado
+                        Navigator.pop(context);
+                        Navigator.pop(context);
                       },
 
                       child: const Text('Sim'),

@@ -71,7 +71,4 @@ class _SplashScreenState extends State<SplashScreen>
   }
 }
 
-// Lembre-se de adicionar a imagem em assets/images/orbyt_logo.png
-// E declarar em pubspec.yaml:
-// assets:
-//   - assets/images/orbyt_logo.png
+

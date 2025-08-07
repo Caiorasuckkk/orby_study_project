@@ -49,7 +49,7 @@ class _SimuladoQuestoesScreenState extends State<SimuladoQuestoesScreen> {
     final erros = widget.exercicios.length - acertos;
     final aproveitamento = ((acertos / widget.exercicios.length) * 100).toStringAsFixed(1);
 
-    // Salvar no Firestore
+
     final user = FirebaseAuth.instance.currentUser;
     if (user != null) {
       final agora = DateTime.now();
@@ -75,7 +75,6 @@ class _SimuladoQuestoesScreenState extends State<SimuladoQuestoesScreen> {
       finalizado = true;
     });
 
-    // Exibir AlertDialog
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
