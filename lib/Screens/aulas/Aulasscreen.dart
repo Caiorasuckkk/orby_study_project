@@ -4,7 +4,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:http/http.dart' as http;
-import 'package:youtube_player_flutter/youtube_player_flutter.dart';
+import 'package:youtube_player_iframe/youtube_player_iframe.dart';
 import 'exerci.dart';
 
 class AulasScreen extends StatefulWidget {
@@ -127,7 +127,7 @@ class _AulasScreenState extends State<AulasScreen> {
           "temperature": 0.7
         }),
       );
-
+      print("Resposta completa: ${response.body}");
       final resposta = jsonDecode(response.body)["choices"][0]["message"]["content"];
 
       setState(() => messages.add({"role": "assistant", "content": resposta}));
@@ -392,41 +392,24 @@ class _AulasScreenState extends State<AulasScreen> {
   }
 }
 
-class YoutubePlayerDialog extends StatefulWidget {
+class YoutubePlayerDialog extends StatelessWidget {
   final String videoId;
 
   const YoutubePlayerDialog({super.key, required this.videoId});
 
   @override
-  State<YoutubePlayerDialog> createState() => _YoutubePlayerDialogState();
-}
-
-class _YoutubePlayerDialogState extends State<YoutubePlayerDialog> {
-  late YoutubePlayerController _controller;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = YoutubePlayerController(
-      initialVideoId: widget.videoId,
-      flags: const YoutubePlayerFlags(autoPlay: true, mute: false),
-    );
-  }
-
-  @override
-  void dispose() {
-    _controller.pause();
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
   Widget build(BuildContext context) {
+    final controller = YoutubePlayerController.fromVideoId(
+      videoId: videoId,
+      autoPlay: true,
+      params: const YoutubePlayerParams(showFullscreenButton: true),
+    );
+
     return Dialog(
       insetPadding: EdgeInsets.zero,
       backgroundColor: Colors.black,
-      child: YoutubePlayerBuilder(
-        player: YoutubePlayer(controller: _controller),
+      child: YoutubePlayerScaffold(
+        controller: controller,
         builder: (context, player) {
           return Stack(
             children: [

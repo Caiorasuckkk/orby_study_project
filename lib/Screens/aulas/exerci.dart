@@ -75,7 +75,7 @@ class _ExerciciosScreenState extends State<ExerciciosScreen> {
 
     final bool aprovado = acertos >= 3;
 
-    // Salva resultado se aprovado
+
     if (aprovado) {
       final uid = FirebaseAuth.instance.currentUser?.uid;
       if (uid != null) {

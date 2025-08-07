@@ -1,11 +1,10 @@
 import 'dart:convert';
-import 'package:file_selector/file_selector.dart';
-import 'package:flutter/material.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart';
-import 'package:http/http.dart' as http;
-import 'package:intl/intl.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/material.dart';
+
+import '../Screens/Menu/StudyPlan.dart';
+import '../Services/openai_services.dart';
 import 'Orby/OrbyIntroScreen.dart';
 
 class EstudosScreen extends StatefulWidget {
@@ -19,242 +18,254 @@ class _EstudosScreenState extends State<EstudosScreen> {
   int _currentStep = 0;
   String? objetivoEstudo;
   final Map<String, dynamic> respostas = {};
+  String? modoEscolhido; // "padrao" ou "personalizado"
+
   final Map<String, TextEditingController> controllers = {
     "outro": TextEditingController(),
-    "experiencia": TextEditingController(),
     "motivacao": TextEditingController(),
     "dataProva": TextEditingController(),
-    "curso": TextEditingController(),
-    "nivel": TextEditingController(),
-    "dificuldades": TextEditingController(),
   };
   DateTime? dataProva;
+  List<String> materiasSelecionadas = [];
 
-  final objetivos = [
-    'Vestibular/Enem',
-    'Faculdade',
-    'Concurso',
-    'Certificação',
-    'Aprendizado Pessoal'
+  final objetivos = ['Vestibular/Enem'];
+
+  final estilosAprendizado = [
+    'Visual',
+    'Auditivo',
+    'Cinestésico',
+    'Leitura/Escrita',
   ];
-
-  final vestibulares = ['ENEM', 'FUVEST', 'UNICAMP', 'UNESP', 'Outros'];
-  final concursos = ['INSS', 'Polícia Federal', 'Banco do Brasil', 'Outros'];
-  final certificacoes = ['AWS Certified', 'Google Cloud', 'Scrum Master', 'Outros'];
-  final aprendizados = ['Programação', 'Design', 'Marketing', 'Outros'];
-  final horarios = ['1 hora', '2 horas', '3 horas', 'Mais de 3 horas'];
+  final turnos = ['Manhã', 'Tarde', 'Noite'];
+  final diasSemana = [
+    '1 dia',
+    '2 dias',
+    '3 dias',
+    '4 dias',
+    '5 dias',
+    '6 dias',
+    'Todos os dias',
+  ];
+  final materias = [
+    'Inglês',
+    'Espanhol',
+    'Filosofia',
+    'Sociologia',
+    'Matematica',
+    'Biologia',
+    'Química',
+    'Física',
+    'Geografia',
+    'Historia',
+    'Portugues',
+    'Literatura',
+  ];
 
   void _nextStep() => setState(() => _currentStep++);
 
+  Future<Map<String, List<String>>> buscarConteudos() async {
+    final db = FirebaseFirestore.instance;
+    final Map<String, List<String>> conteudos = {};
+    for (final materia in materias) {
+      final snapshot = await db.collection('Estudo/$materia/$materia').get();
+      final topicos = snapshot.docs.map((doc) => doc.id).toList();
+      conteudos[materia] = topicos;
+      print("📚 $materia: ${topicos.length} tópicos");
+    }
+    return conteudos;
+  }
+
+  Future<void> gerarPlanoEstudosPorBlocos(Map<String, List<String>> conteudos) async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) throw Exception("Usuário não autenticado");
+
+    final planoFinal = <String, Map<String, dynamic>>{};
+    const maxTopicosPorBloco = 10;
+
+    // Informações do usuário
+    final diasSelecionado = respostas['dias']?.toString() ?? '5 dias';
+    final diasPorSemana = int.tryParse(RegExp(r'\d+').stringMatch(diasSelecionado) ?? '5') ?? 5;
+    final dataProvaStr = respostas['dataProva'] as String?;
+    final dataProva = dataProvaStr != null ? DateTime.tryParse(dataProvaStr) : null;
+    final hoje = DateTime.now();
+    final semanasRestantes = dataProva != null ? (dataProva.difference(hoje).inDays / 7).ceil() : 4;
+
+    for (final entry in conteudos.entries) {
+      final materia = entry.key;
+      final topicos = entry.value;
+
+      for (var i = 0; i < topicos.length; i += maxTopicosPorBloco) {
+        final bloco = topicos.skip(i).take(maxTopicosPorBloco).toList();
+
+        final prompt = StringBuffer();
+        prompt.writeln("Você é um organizador de planos de estudos personalizado.");
+        prompt.writeln("Crie um plano de estudos para a matéria $materia.");
+        prompt.writeln("Distribua os seguintes tópicos ao longo de $semanasRestantes semanas, com $diasPorSemana dias de estudo por semana.");
+        if (dataProva != null) {
+          prompt.writeln("O plano deve terminar no máximo até a data da prova: ${dataProva.day}/${dataProva.month}/${dataProva.year}.");
+        }
+        prompt.writeln("Formato de resposta JSON:");
+        prompt.writeln('''{
+  "Semana 1": {
+    "Segunda-feira": ["Tópico 1", "Tópico 2"],
+    ...
+  }
+}''');
+        prompt.writeln("Tópicos:");
+        bloco.forEach((t) => prompt.writeln("- $t"));
+
+        final response = await chamarOpenAI(prompt.toString());
+        final cleaned = response.replaceAll(RegExp(r'```json|```'), '').trim();
+
+        Map<String, dynamic> jsonParcial;
+        try {
+          jsonParcial = jsonDecode(cleaned);
+        } catch (e) {
+          print("Erro ao decodificar resposta parcial: $e");
+          continue;
+        }
+
+        jsonParcial.forEach((semana, dias) {
+          planoFinal.putIfAbsent(semana, () => {});
+          (dias as Map<String, dynamic>).forEach((dia, topicosDia) {
+            planoFinal[semana]!.putIfAbsent(dia, () => []);
+            (planoFinal[semana]![dia] as List).addAll(topicosDia);
+          });
+        });
+      }
+    }
+
+    await FirebaseFirestore.instance
+        .collection("usuarios")
+        .doc(uid)
+        .collection("Objetivo")
+        .doc("Estudos")
+        .set({
+      "Tipo": "Estudos",
+      "PlanoGerado": planoFinal,
+    }, SetOptions(merge: true));
+  }
+
+
   Future<void> _salvarRespostas() async {
-    try {
-      final uid = FirebaseAuth.instance.currentUser?.uid;
-      if (uid == null) {
-        throw Exception("Usuário não está logado");
-      }
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+    respostas['materiasDificeis'] = materiasSelecionadas;
 
-      // Gera plano com IA
-      String planoIA = await gerarPlanoEstudosComIA(respostas);
-
-      // Salva no Firestore
-      await FirebaseFirestore.instance
-          .collection("usuarios")
-          .doc(uid)
-          .collection("Objetivo")
-          .doc("Estudos")
-          .set({
-        "Tipo": "Estudos",
-        "Perguntas": respostas,
-        "PlanoIA": planoIA, // ← Adiciona o plano
-        "Gerado_em": DateFormat('dd/MM/yyyy HH:mm').format(DateTime.now()),
-      });
-
+    await FirebaseFirestore.instance
+        .collection("usuarios")
+        .doc(uid)
+        .collection("Objetivo")
+        .doc("Estudos")
+        .set({"Tipo": "Estudos", "Perguntas": respostas});
+    if (respostas['Objetivo'] == 'Vestibular/Enem') {
+      final conteudos = await buscarConteudos();
+     await gerarPlanoEstudosPorBlocos(conteudos);
+      (conteudos);
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Respostas salvas e plano gerado com sucesso!")),
+          const SnackBar(
+            content: Text("Plano de estudos gerado e salvo com sucesso!"),
+          ),
         );
-        Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const OrbyIntroScreen()));
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (_) => const StudyPlanScreen()),
+        );
       }
-    } catch (e) {
-      print("Erro ao salvar ou gerar plano: $e");
+    } else {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Erro: ${e.toString()}")),
+          const SnackBar(content: Text("Respostas salvas com sucesso!")),
+        );
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (_) => const OrbyIntroScreen()),
         );
       }
     }
   }
 
-
-
   Widget _buildCustomQuestion() {
-    if (_currentStep == 0) {
+    if (modoEscolhido == null) {
       return _buildLabeledOptions(
-        'Você estuda para qual tipo de objetivo?',
-        objetivos,
-        objetivoEstudo,
-            (val) {
+        'Como deseja montar seu plano de estudos?',
+        ['Plano Padrão (aulas já organizadas)', 'Plano Personalizado com IA'],
+        null,
+        (val) {
           setState(() {
-            objetivoEstudo = val;
-            respostas['Objetivo'] = val;
-            _currentStep = 0;
+            modoEscolhido = val.contains('Padrão') ? 'padrao' : 'personalizado';
           });
         },
       );
     }
 
-    switch (objetivoEstudo) {
-      case 'Vestibular/Enem':
-        switch (_currentStep) {
-          case 1:
-            return _buildWithOther(vestibulares, 'Qual vestibular você pretende prestar?', 'vestibular');
-          case 2:
-            return _buildYesNoField('Você já definiu um cronograma de estudos?', 'cronograma');
-          case 3:
-            return _buildLabeledOptions('Quantas horas por semana você pode estudar?', horarios, respostas['horas'], (val) => setState(() => respostas['horas'] = val));
-          case 4:
-            return _buildTextField('Quais disciplinas você considera mais difíceis?', 'dificuldades');
-        }
-        break;
-
-      case 'Faculdade':
-        switch (_currentStep) {
-          case 1:
-            return _buildTextField('Qual curso você está cursando?', 'curso');
-          case 2:
-            return _buildYesNoField('Você está gostando do curso?', 'gosta_curso');
-          case 3:
-            return _buildLabeledOptions('Quantas horas por semana você pode estudar?', horarios, respostas['horas'], (val) => setState(() => respostas['horas'] = val));
-          case 4:
-            return _buildTextField('Quais são suas principais dificuldades acadêmicas?', 'dificuldades');
-        }
-        break;
-
-      case 'Aprendizado Pessoal':
-        switch (_currentStep) {
-          case 1:
-            return _buildWithOther(aprendizados, 'O que você quer aprender?', 'tema');
-          case 2:
-            return _buildTextField('Por que você quer aprender isso?', 'motivacao');
-          case 3:
-            return _buildLabeledOptions('Quantas horas por semana você pode estudar?', horarios, respostas['horas'], (val) => setState(() => respostas['horas'] = val));
-        }
-        break;
-
-      case 'Concurso':
-        switch (_currentStep) {
-          case 1:
-            return _buildWithOther(concursos, 'Qual concurso você pretende prestar?', 'concurso');
-          case 2:
-            return _buildWithOther(['Administrativa', 'Jurídica', 'Saúde', 'Outros'], 'Área do concurso:', 'area');
-          case 3:
-            return _buildDataPicker();
-          case 4:
-            return _buildLabeledOptions('Quantas horas por semana você pode estudar?', horarios, respostas['horas'], (val) => setState(() => respostas['horas'] = val));
-        }
-        break;
-
-      case 'Certificação':
-        switch (_currentStep) {
-          case 1:
-            return _buildWithOther(certificacoes, 'Qual certificação você está buscando?', 'certificacao');
-          case 2:
-            return _buildWithOther(['Melhorar currículo', 'Exigência do trabalho', 'Transição de carreira'], 'Motivo:', 'motivo');
-          case 3:
-            return _buildTextField('Você já possui alguma experiência na área?', 'experiencia');
-          case 4:
-            return _buildLabeledOptions('Quantas horas por semana você pode estudar?', horarios, respostas['horas'], (val) => setState(() => respostas['horas'] = val));
-        }
-        break;
+    switch (_currentStep) {
+      case 0:
+        return _buildLabeledOptions(
+          'Você estuda para qual tipo de objetivo?',
+          objetivos,
+          objetivoEstudo,
+          (val) {
+            setState(() {
+              objetivoEstudo = val;
+              respostas['Objetivo'] = val;
+            });
+          },
+        );
+      case 1:
+        return _buildLabeledOptions(
+          'Qual seu estilo de aprendizado preferido?',
+          estilosAprendizado,
+          respostas['estilo'],
+          (val) => setState(() => respostas['estilo'] = val),
+        );
+      case 2:
+        return _buildLabeledOptions(
+          'Qual melhor turno para você estudar?',
+          turnos,
+          respostas['turno'],
+          (val) => setState(() => respostas['turno'] = val),
+        );
+      case 3:
+        return _buildLabeledOptions(
+          'Quantos dias por semana você pode estudar?',
+          diasSemana,
+          respostas['dias'],
+          (val) => setState(() => respostas['dias'] = val),
+        );
+      case 4:
+        return _buildLabeledOptions(
+          'Você prefere revisar ou simular questões?',
+          ['Revisar', 'Simular', 'Ambos'],
+          respostas['preferencia'],
+          (val) => setState(() => respostas['preferencia'] = val),
+        );
+      case 5:
+        return _buildDataProva();
+      case 6:
+        return _buildCheckboxMateriasDificeis();
+      default:
+        return const SizedBox();
     }
-
-    return const SizedBox();
   }
 
-  Widget _buildWithOther(List<String> options, String pergunta, String key) {
+  Widget _buildDataProva() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(pergunta, style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
-        const SizedBox(height: 12),
-        ...options.map((opt) => Container(
-          margin: const EdgeInsets.symmetric(vertical: 6),
-          width: double.infinity,
-          child: ElevatedButton(
-            onPressed: () => setState(() => respostas[key] = opt == 'Outros' ? controllers['outro']!.text : opt),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: respostas[key] == opt ? Colors.blue : Colors.transparent,
-              side: const BorderSide(color: Colors.white),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(40)),
-              padding: const EdgeInsets.symmetric(vertical: 14),
-            ),
-            child: Text(opt, style: const TextStyle(color: Colors.white)),
+        const Text(
+          'Quando é sua prova?',
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: 18,
+            fontWeight: FontWeight.bold,
           ),
-        )),
-        if (respostas[key] == controllers['outro']!.text || respostas[key] == 'Outros')
-          TextField(
-            controller: controllers['outro'],
-            onChanged: (val) => setState(() => respostas[key] = val),
-            decoration: _inputDecoration('Digite aqui'),
-            style: const TextStyle(color: Colors.white),
-          )
-      ],
-    );
-  }
-
-  Widget _buildLabeledOptions(String pergunta, List<String> options, String? selected, Function(String) onSelected) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(pergunta, style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+        ),
         const SizedBox(height: 12),
-        ...options.map((opt) => Container(
-          margin: const EdgeInsets.symmetric(vertical: 6),
-          width: double.infinity,
-          child: ElevatedButton(
-            onPressed: () => onSelected(opt),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: selected == opt ? Colors.blue : Colors.transparent,
-              side: const BorderSide(color: Colors.white),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(40)),
-              padding: const EdgeInsets.symmetric(vertical: 14),
-            ),
-            child: Text(opt, style: const TextStyle(color: Colors.white)),
-          ),
-        ))
-      ],
-    );
-  }
-
-  Widget _buildTextField(String label, String key) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(label, style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
-        const SizedBox(height: 8),
-        TextField(
-          controller: controllers[key],
-          onChanged: (val) => respostas[key] = val,
-          decoration: _inputDecoration(label),
-          style: const TextStyle(color: Colors.white),
-        )
-      ],
-    );
-  }
-
-  Widget _buildYesNoField(String pergunta, String key) {
-    return _buildLabeledOptions(pergunta, ['Sim', 'Não'], respostas[key], (val) => setState(() => respostas[key] = val));
-  }
-
-  Widget _buildDataPicker() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text('Data da prova', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
-        const SizedBox(height: 8),
-        GestureDetector(
-          onTap: () async {
-            final picked = await showDatePicker(
+        ElevatedButton(
+          onPressed: () async {
+            final DateTime? picked = await showDatePicker(
               context: context,
               initialDate: DateTime.now(),
               firstDate: DateTime.now(),
@@ -263,30 +274,94 @@ class _EstudosScreenState extends State<EstudosScreen> {
             if (picked != null) {
               setState(() {
                 dataProva = picked;
-                respostas['data_prova'] = DateFormat('dd/MM/yyyy').format(picked);
-                controllers['dataProva']!.text = respostas['data_prova'];
+                respostas['dataProva'] = picked.toIso8601String();
               });
             }
           },
-          child: AbsorbPointer(
-            child: TextField(
-              controller: controllers['dataProva'],
-              decoration: _inputDecoration('Selecione a data'),
-              style: const TextStyle(color: Colors.white),
-            ),
+          style: ElevatedButton.styleFrom(backgroundColor: Colors.blue),
+          child: Text(
+            dataProva == null
+                ? "Selecionar data"
+                : "${dataProva!.day}/${dataProva!.month}/${dataProva!.year}",
           ),
         ),
       ],
     );
   }
 
-  InputDecoration _inputDecoration(String label) {
-    return InputDecoration(
-      labelText: label,
-      labelStyle: const TextStyle(color: Colors.white),
-      filled: true,
-      fillColor: Colors.white12,
-      border: OutlineInputBorder(borderRadius: BorderRadius.circular(40)),
+  Widget _buildCheckboxMateriasDificeis() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Quais matérias você tem mais dificuldade?',
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: 18,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        const SizedBox(height: 12),
+        ...materias.map(
+          (materia) => CheckboxListTile(
+            title: Text(materia, style: const TextStyle(color: Colors.white)),
+            value: materiasSelecionadas.contains(materia),
+            onChanged: (bool? selected) {
+              setState(() {
+                if (selected == true) {
+                  materiasSelecionadas.add(materia);
+                } else {
+                  materiasSelecionadas.remove(materia);
+                }
+              });
+            },
+            controlAffinity: ListTileControlAffinity.leading,
+            activeColor: Colors.blue,
+            checkColor: Colors.white,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildLabeledOptions(
+    String pergunta,
+    List<String> options,
+    String? selected,
+    Function(String) onSelected,
+  ) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          pergunta,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 18,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        const SizedBox(height: 12),
+        ...options.map(
+          (opt) => Container(
+            margin: const EdgeInsets.symmetric(vertical: 6),
+            width: double.infinity,
+            child: ElevatedButton(
+              onPressed: () => onSelected(opt),
+              style: ElevatedButton.styleFrom(
+                backgroundColor:
+                    selected == opt ? Colors.blue : Colors.transparent,
+                side: const BorderSide(color: Colors.white),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(40),
+                ),
+                padding: const EdgeInsets.symmetric(vertical: 14),
+              ),
+              child: Text(opt, style: const TextStyle(color: Colors.white)),
+            ),
+          ),
+        ),
+      ],
     );
   }
 
@@ -303,13 +378,21 @@ class _EstudosScreenState extends State<EstudosScreen> {
                 children: [
                   Image.asset('assets/images/orby_semtxt.png', height: 70),
                   const SizedBox(width: 8),
-                  const Text('Orbyt', style: TextStyle(color: Colors.white, fontSize: 30, fontWeight: FontWeight.bold)),
+                  const Text(
+                    'Orbyt',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 30,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
                 ],
               ),
               const SizedBox(height: 40),
               Expanded(
                 child: SingleChildScrollView(
-                  keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+                  keyboardDismissBehavior:
+                      ScrollViewKeyboardDismissBehavior.onDrag,
                   child: _buildCustomQuestion(),
                 ),
               ),
@@ -318,23 +401,37 @@ class _EstudosScreenState extends State<EstudosScreen> {
                 width: double.infinity,
                 child: ElevatedButton(
                   onPressed: () {
-                    int finalStep = 4;
-                    if (objetivoEstudo == 'Aprendizado Pessoal') finalStep = 3;
-                    if (objetivoEstudo == 'Faculdade') finalStep = 4;
-                    if (_currentStep < finalStep) {
+                    if (modoEscolhido == null) return;
+
+                    if (_currentStep < 6) {
                       _nextStep();
                     } else {
-                      _salvarRespostas();
+                      if (modoEscolhido == 'padrao') {
+                        Navigator.pushReplacement(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => const OrbyIntroScreen(),
+                          ),
+                        );
+                      } else {
+                        _salvarRespostas();
+                      }
                     }
                   },
                   style: ElevatedButton.styleFrom(
                     backgroundColor: const Color(0xFF4A90E2),
                     padding: const EdgeInsets.symmetric(vertical: 16),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(40)),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(40),
+                    ),
                   ),
                   child: Text(
-                    (_currentStep < 4 && !(objetivoEstudo == 'Aprendizado Pessoal' && _currentStep >= 3)) ? "Próximo" : "Finalizar",
-                    style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+                    _currentStep < 6 ? "Próximo" : "Finalizar",
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                 ),
               ),
@@ -345,64 +442,3 @@ class _EstudosScreenState extends State<EstudosScreen> {
     );
   }
 }
-
-Future<String> gerarPlanoEstudosComIA(Map<String, dynamic> respostas) async {
-  const endpoint = 'https://api.openai.com/v1/chat/completions';
-  await dotenv.load();
-
-  final openAIApiKey = dotenv.env['OPENAI_API_KEY'];
-
-  final prompt = '''
-Sou um mentor de estudos para vestibulares. Com base nas informações fornecidas pelo aluno, crie um plano de estudos **detalhado, equilibrado e eficaz**.
-
-🔹 Instruções:
-
-1. Dê ênfase especial às dificuldades relatadas pelo aluno.
-2. Aborde todas as disciplinas cobradas no vestibular (Matemática, Português, Redação, Química, Física, Biologia, História, Geografia, Sociologia, Filosofia, Inglês).
-3. Estruture o plano por semanas, com estimativa de horas por matéria.
-4. Para cada matéria, sugira:
-   - Tópicos a estudar
-   - Recursos recomendados (links gratuitos, como Khan Academy, Brasil Escola, Descomplica, YouTube etc.)
-   - 1 ou 2 exercícios sugeridos por tema
-   - Simulados online (se possível com link)
-
-5. Inclua técnicas de revisão, memorização e prática.
-6. Finalize com um resumo motivacional e estratégias personalizadas de organização.
-
-📋 Informações do aluno:
-Objetivo: ${respostas['vestibular'] ?? 'N/A'}
-Dificuldades: ${respostas['dificuldades'] ?? 'Não informado'}
-Horas por semana disponíveis: ${respostas['horas'] ?? 'N/A'}
-Estilo de aprendizado: ${respostas['estilo'] ?? 'Não informado'}
-Nível atual: ${respostas['nivel'] ?? 'N/A'}
-Motivação: ${respostas['motivacao'] ?? 'N/A'}
-Experiência prévia: ${respostas['experiencia'] ?? 'N/A'}
-Data da prova: ${respostas['data_prova'] ?? 'N/A'}
-
-🎯 O plano deve ter linguagem amigável, clara e visualmente bem estruturada. Use marcação por semana e matérias.
-''';
-
-
-  final response = await http.post(
-    Uri.parse(endpoint),
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': 'Bearer $openAIApiKey',
-    },
-    body: jsonEncode({
-      'model': 'gpt-4',
-      'messages': [
-        {'role': 'user', 'content': prompt},
-      ],
-      'temperature': 0.7,
-    }),
-  );
-
-  if (response.statusCode == 200) {
-    final data = jsonDecode(response.body);
-    return data['choices'][0]['message']['content'];
-  } else {
-    throw Exception('Erro ao gerar plano: ${response.body}');
-  }
-}
-

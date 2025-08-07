@@ -15,8 +15,8 @@ class SimuladoScreen extends StatefulWidget {
 }
 
 class _SimuladoScreenState extends State<SimuladoScreen> {
-  Map<String, dynamic> resultados = {};
   Map<String, List<String>> topicosAprovadosPorMateria = {};
+  bool isLoading = false;
 
   final Map<String, String> areaPorMateria = {
     'Matematica': 'Exatas',
@@ -45,55 +45,53 @@ class _SimuladoScreenState extends State<SimuladoScreen> {
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) return;
 
-      final planoSnapshot = await FirebaseFirestore.instance
-          .doc('usuarios/${user.uid}/Objetivo/Estudos')
+      final resultadosSnapshot = await FirebaseFirestore.instance
+          .collection('usuarios')
+          .doc(user.uid)
+          .collection('Resultados')
           .get();
-      resultados = planoSnapshot.data()?['Resultados'] ?? {};
-
-      final materias = areaPorMateria.entries
-          .where((entry) => entry.value == widget.area)
-          .map((entry) => entry.key)
-          .toList();
 
       final Map<String, List<String>> topicosMap = {};
 
-      for (final materia in materias) {
-        final subtopicosSnap = await FirebaseFirestore.instance
-            .collection('Estudo')
-            .doc(materia)
-            .collection(materia)
-            .get();
-        final aprovados = subtopicosSnap.docs
-            .map((doc) => doc.id)
-            .where((id) => resultados[id] == 'aprovado')
-            .toList();
+      for (final doc in resultadosSnapshot.docs) {
+        final subtopico = doc.id;
 
-        if (aprovados.isNotEmpty) {
-          topicosMap[materia] = aprovados;
+        for (final materia in areaPorMateria.keys) {
+          final subtopicoDoc = await FirebaseFirestore.instance
+              .collection('Estudo')
+              .doc(materia)
+              .collection(materia)
+              .doc(subtopico)
+              .get();
+
+          if (subtopicoDoc.exists && areaPorMateria[materia] == widget.area) {
+            topicosMap.putIfAbsent(materia, () => []).add(subtopico);
+            break;
+          }
         }
       }
 
-      setState(() {
-        topicosAprovadosPorMateria = topicosMap;
-      });
+      if (mounted) {
+        setState(() {
+          topicosAprovadosPorMateria = topicosMap;
+        });
+      }
     } catch (e) {
-      print('Erro ao carregar tópicos aprovados: $e');
+      print('❌ Erro ao carregar tópicos aprovados: $e');
     }
   }
 
   Future<void> gerarSimulado() async {
-    Future<List<dynamic>> gerar15Questoes(String materia, List<String> topicos) async {
+    setState(() => isLoading = true);
+
+    Future<List<dynamic>> gerarQuestoes(String materia, List<String> topicos) async {
       final prompt = StringBuffer();
       prompt.writeln("Você é um professor especialista em $materia.");
-      prompt.writeln("Crie exatamente 15 exercícios de múltipla escolha (com 4 alternativas cada), cobrindo os tópicos abaixo.");
-      prompt.writeln("Cada exercício deve conter:");
-      prompt.writeln("- 'pergunta': enunciado da questão");
-      prompt.writeln("- 'alternativas': lista com 4 opções (A, B, C, D)");
-      prompt.writeln("- 'resposta': alternativa correta (A, B, C ou D)");
-      prompt.writeln("- 'explicacao': justificativa da resposta");
-      prompt.writeln("IMPORTANTE: evite aspas duplas dentro da pergunta. Se usar, escape com \\\".");
-      prompt.writeln("Retorne APENAS uma lista JSON com 15 objetos, nada antes nem depois.");
-      prompt.writeln("\nTópicos:\n${topicos.map((t) => '- $t').join('\n')}");
+      prompt.writeln("Crie 15 exercícios de múltipla escolha com 4 alternativas cada.");
+      prompt.writeln("Cada questão deve conter: 'pergunta', 'alternativas', 'resposta', 'explicacao'.");
+      prompt.writeln("Evite aspas duplas dentro das perguntas.");
+      prompt.writeln("Retorne apenas uma lista JSON com os exercícios.");
+      prompt.writeln("Tópicos: ${topicos.map((t) => '- $t').join('\n')}");
 
       final content = await chamarOpenAI(prompt.toString());
       final cleaned = content.replaceAll(RegExp(r'```json|```'), '').trim();
@@ -121,15 +119,15 @@ class _SimuladoScreenState extends State<SimuladoScreen> {
         }
       }
 
-      if (listaFinal.length != 15) {
-        throw Exception("❌ Foram geradas ${listaFinal.length} questões, e não 15.");
+      if (listaFinal.length < 15) {
+        throw Exception("❌ Foram geradas ${listaFinal.length} questões, e não pelo menos 15.");
       }
 
       for (var questao in listaFinal) {
         questao['materia'] = materia;
       }
 
-      return listaFinal;
+      return listaFinal.take(15).toList();
     }
 
     try {
@@ -139,10 +137,8 @@ class _SimuladoScreenState extends State<SimuladoScreen> {
         final materia = entry.key;
         final topicos = entry.value;
 
-        final exercicios1 = await gerar15Questoes(materia, topicos);
-        final exercicios2 = await gerar15Questoes(materia, topicos);
-        todos.addAll(exercicios1);
-        todos.addAll(exercicios2);
+        final exercicios = await gerarQuestoes(materia, topicos);
+        todos.addAll(exercicios);
       }
 
       if (!mounted) return;
@@ -158,9 +154,13 @@ class _SimuladoScreenState extends State<SimuladoScreen> {
       );
     } catch (e) {
       print("❌ Erro ao gerar simulado: $e");
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Erro ao gerar simulado')),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(e.toString())),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => isLoading = false);
     }
   }
 
@@ -187,107 +187,83 @@ class _SimuladoScreenState extends State<SimuladoScreen> {
     return Scaffold(
       backgroundColor: const Color(0xFF0D1A2B),
       body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
+        child: Stack(
+          children: [
+            SingleChildScrollView(
+              padding: const EdgeInsets.all(16),
+              child: Column(
                 children: [
-                  IconButton(
-                    icon: const Icon(Icons.arrow_back, color: Colors.white),
-                    onPressed: () => Navigator.pop(context),
-                  ),
-                  const SizedBox(width: 4),
-                  Image.asset('assets/images/orby_semtxt.png', height: 40),
-                  const SizedBox(width: 8),
-                  const Expanded(
-                    child: Text(
-                      'Orbyt',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 24,
-                        fontWeight: FontWeight.bold,
+                  Row(
+                    children: [
+                      IconButton(
+                        icon: const Icon(Icons.arrow_back, color: Colors.white),
+                        onPressed: () => Navigator.pop(context),
                       ),
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 24),
-              Center(
-                child: Column(
-                  children: [
-                    Text(
-                      'Simulado de ${widget.area}',
-                      style: const TextStyle(
-                        fontSize: 22,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.amberAccent,
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    Container(
-                      decoration: BoxDecoration(
-                        color: Colors.blueGrey.shade800,
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      padding: const EdgeInsets.all(12),
-                      child: const Text(
-                        'Este simulado é apenas um teste para avaliar seu progresso no estudo.\n\nVocê pode realizá-lo quantas vezes quiser e não haverá limite de tempo.',
-                        style: TextStyle(fontSize: 15, color: Colors.white),
-                        textAlign: TextAlign.center,
-                      ),
-                    ),
-                    const SizedBox(height: 24),
-                    const Text(
-                      'O simulado será composto das seguintes matérias que você concluiu até agora:',
-                      style: TextStyle(
-                        fontSize: 16,
-                        color: Colors.white,
-                        fontWeight: FontWeight.w600,
-                      ),
-                      textAlign: TextAlign.center,
-                    ),
-                    const SizedBox(height: 24),
-                  ],
-                ),
-              ),
-              topicosAprovadosPorMateria.isEmpty
-                  ? const Center(
-                child: Padding(
-                  padding: EdgeInsets.only(top: 32),
-                  child: Text(
-                    'Nenhum tópico aprovado ainda.',
-                    style: TextStyle(color: Colors.white70),
-                  ),
-                ),
-              )
-                  : Column(
-                children: topicosAprovadosPorMateria.entries.map((entry) {
-                  return Container(
-                    margin: const EdgeInsets.only(bottom: 16),
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: Colors.blueGrey.shade900,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          entry.key,
-                          style: const TextStyle(
-                            color: Colors.lightBlueAccent,
-                            fontSize: 18,
+                      const SizedBox(width: 8),
+                      Image.asset('assets/images/orby_semtxt.png', height: 40),
+                      const SizedBox(width: 8),
+                      const Expanded(
+                        child: Text(
+                          'Orbyt',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 24,
                             fontWeight: FontWeight.bold,
                           ),
                         ),
-                        const SizedBox(height: 8),
-                        ...entry.value.map(
-                              (topico) => Padding(
-                            padding: const EdgeInsets.only(bottom: 6),
-                            child: Text(
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 24),
+                  Text(
+                    'Simulado de ${widget.area}',
+                    style: const TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.amberAccent,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Container(
+                    decoration: BoxDecoration(
+                      color: Colors.blueGrey.shade800,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    padding: const EdgeInsets.all(12),
+                    child: const Text(
+                      'Este simulado é um teste para avaliar seu progresso.\nVocê pode realizá-lo quantas vezes quiser.',
+                      style: TextStyle(fontSize: 15, color: Colors.white),
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                  const Text(
+                    'Matérias incluídas com tópicos aprovados:',
+                    style: TextStyle(color: Colors.white70),
+                  ),
+                  const SizedBox(height: 16),
+                  ...topicosAprovadosPorMateria.entries.map((entry) {
+                    return Container(
+                      margin: const EdgeInsets.only(bottom: 12),
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.blueGrey.shade900,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            entry.key,
+                            style: const TextStyle(
+                              color: Colors.lightBlueAccent,
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          ...entry.value.map(
+                                (topico) => Text(
                               '• $topico',
                               style: const TextStyle(
                                 color: Colors.white,
@@ -295,34 +271,38 @@ class _SimuladoScreenState extends State<SimuladoScreen> {
                               ),
                             ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
+                    );
+                  }),
+                  const SizedBox(height: 32),
+                  ElevatedButton.icon(
+                    onPressed: isLoading || topicosAprovadosPorMateria.isEmpty
+                        ? null
+                        : gerarSimulado,
+                    icon: const Icon(Icons.play_arrow),
+                    label: const Text("Realizar Simulado"),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor:
+                      isLoading ? Colors.grey : Colors.green,
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 24, vertical: 14),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
                     ),
-                  );
-                }).toList(),
+                  ),
+                ],
               ),
-              const SizedBox(height: 32),
-              Center(
-                child: ElevatedButton.icon(
-                  onPressed: topicosAprovadosPorMateria.isEmpty ? null : gerarSimulado,
-                  icon: const Icon(Icons.play_arrow, color: Colors.white),
-                  label: const Text(
-                    'Realizar Simulado',
-                    style: TextStyle(fontSize: 16, color: Colors.white),
-                  ),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor:
-                    topicosAprovadosPorMateria.isEmpty ? Colors.grey : Colors.green,
-                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                  ),
+            ),
+            if (isLoading)
+              Container(
+                color: Colors.black.withOpacity(0.6),
+                child: const Center(
+                  child: CircularProgressIndicator(color: Colors.amberAccent),
                 ),
               ),
-              const SizedBox(height: 24),
-            ],
-          ),
+          ],
         ),
       ),
     );
